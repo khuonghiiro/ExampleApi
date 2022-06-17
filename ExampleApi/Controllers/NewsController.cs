@@ -37,5 +37,12 @@ namespace ExampleApi.Controllers
 
             return _news.InsertSingleAsync(news);
         }
+
+
+        [HttpGet("title")]
+        public async Task<List<News>?> DoSearchAsync(string title = "")
+        {
+            return await _news.ElasticSearchTitle(title);
+        }
     }
 }

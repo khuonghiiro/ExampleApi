@@ -56,5 +56,20 @@ namespace ExampleApi.Services
         {
             return NewsList;
         }
+
+        public async Task<List<News>?> ElasticSearchTitle(string title)
+        {
+            var response = await(_elasticClient.SearchAsync<News>(s => s
+                                    .Index("news")
+                                    .Query(q => q
+                                        .Match(m => m
+                                            .Field(f => f.Title)
+                                            .Query(title)
+                                        )
+                                    )
+                                ));
+
+            return response.Hits.Select(s => s.Source).ToList();
+        }
     }
 }

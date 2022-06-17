@@ -11,5 +11,7 @@ namespace ExampleApi.Services
         public List<News>? GetNewsByPage(int page);
 
         public List<News>? SearchNews(string search);
+
+        public Task<List<News>?> ElasticSearchTitle(string title);
     }
 }

@@ -23,33 +23,49 @@ namespace ExampleApi.Services
             _elasticClient = elasticClient;
         }
 
-        public List<News> GetNewsByPage(int page)
-        {
-            throw new NotImplementedException();
-        }
-
         public async Task<string> InsertSingleAsync(News news)
         {
-            await _elasticClient.IndexAsync<News>(news, x => x.Index("news"));
-
             string cacheKey = Convert.ToString(news.Id);
+            
+            // Insert data Redis
+            await InsertDataRedis(news);
 
-            string cachedDataString = JsonSerializer.Serialize(news);
+            // Insert data ElasticSearch
+            await InsertDataES(news);
 
-            var dataToCache = Encoding.UTF8.GetBytes(cachedDataString);
+            if(NewsList != null)
+            {
+                // insert all data
+                foreach (var item in NewsList)
+                {
+                    byte[]? cachedData = await _cache.GetAsync(Convert.ToString(item.Id));
 
-            var options = new DistributedCacheEntryOptions()
-                .SetAbsoluteExpiration(DateTime.Now.AddMinutes(5))
-                .SetSlidingExpiration(TimeSpan.FromMinutes(3));
+                    var response = await _elasticClient.GetAsync<News>(new DocumentPath<News>(
+                        new Id(news.Id)), x => x.Index("news"));
 
-            await _cache.SetAsync(cacheKey, dataToCache, options);
+                    if (response.IsValid && cachedData != null)
+                    {
+                        continue;
+                    }
 
-            return "Insert success!";
+                    // Insert data Redis
+                    await InsertDataRedis(item);
+
+                    // Insert data ElasticSearch
+                    await InsertDataES(item);
+                }
+            }
+            
+            return "Insert ElasticSearch and Redis success!";
         }
 
-        public List<News> SearchNews(string search)
+        public async Task<List<News>?> SearchNewByPage(int page)
         {
-            throw new NotImplementedException();
+            var response = await(_elasticClient.SearchAsync<News>(s => s
+                                    .Index("news").Size(page)
+                                ));
+
+            return response.Hits.Select(s => s.Source).ToList();
         }
 
         public List<News>? GetAllData()
@@ -59,17 +75,51 @@ namespace ExampleApi.Services
 
         public async Task<List<News>?> ElasticSearchTitle(string title)
         {
-            var response = await(_elasticClient.SearchAsync<News>(s => s
+            var response = await (_elasticClient.SearchAsync<News>(s => s
                                     .Index("news")
                                     .Query(q => q
-                                        .Match(m => m
+                                        .Regexp(r => r
                                             .Field(f => f.Title)
-                                            .Query(title)
+                                            .Value(String.Format(".*{0}.*", title))
                                         )
                                     )
                                 ));
 
             return response.Hits.Select(s => s.Source).ToList();
+        }
+
+        /// <summary>
+        /// Insert data in ElasticSearch
+        /// </summary>
+        /// <param name="news">Object data model News</param>
+        /// <returns></returns>
+        private async Task InsertDataES(News news)
+        {
+            // Insert data ElasticSearch
+            await _elasticClient.IndexAsync<News>(news, x => x.Index("news").Refresh(Elasticsearch.Net.Refresh.True));
+        }
+
+        /// <summary>
+        /// Insert data in Redis
+        /// </summary>
+        /// <param name="news">Object data model News</param>
+        /// <returns></returns>
+        private async Task InsertDataRedis(News news)
+        {
+            string cacheKey = Convert.ToString(news.Id);
+
+            byte[]? cachedData = await _cache.GetAsync(cacheKey);
+
+            string cachedDataString = JsonSerializer.Serialize(news);
+
+            var dataToCache = Encoding.UTF8.GetBytes(cachedDataString);
+
+            var options = new DistributedCacheEntryOptions()
+                .SetAbsoluteExpiration(DateTime.Now.AddMinutes(5))
+                .SetSlidingExpiration(TimeSpan.FromMinutes(3));
+
+            // Insert data Redis
+            await _cache.SetAsync(cacheKey, dataToCache, options);
         }
     }
 }

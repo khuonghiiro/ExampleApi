@@ -23,6 +23,12 @@ namespace ExampleApi.Controllers
             return _news.GetAllData();
         }
 
+        [HttpGet("{page}")]
+        public Task<List<News>?> GetNewsByPage(int page)
+        {
+            return _news.SearchNewByPage(page);
+        }
+
         [HttpPost]
         public Task<string> Post(News news)
         {
@@ -33,7 +39,7 @@ namespace ExampleApi.Controllers
             long unixTime = ((DateTimeOffset)dateTime).ToUnixTimeSeconds();
 
             news.Time = stringDate;
-            news.TimeUnix = unixTime;
+            news.TimeUnix = unixTime*1000;
 
             return _news.InsertSingleAsync(news);
         }

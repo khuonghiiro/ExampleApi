@@ -8,9 +8,7 @@ namespace ExampleApi.Services
 
         public Task<string> InsertSingleAsync(News news);
 
-        public List<News>? GetNewsByPage(int page);
-
-        public List<News>? SearchNews(string search);
+        public Task<List<News>?> SearchNewByPage(int page);
 
         public Task<List<News>?> ElasticSearchTitle(string title);
     }

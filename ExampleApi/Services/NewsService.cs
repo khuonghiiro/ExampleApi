@@ -71,16 +71,81 @@ namespace ExampleApi.Services
         /// <returns></returns>
         public async Task<List<News>?> SearchNewByPage(int page)
         {
-            var response = await (_elasticClient.SearchAsync<News>(s => s
-                                    .Index("news").Size(page)
-                                ));
+            //var response = await (_elasticClient.SearchAsync<News>(s => s
+            //                        .Index("news").Size(page)
+            //                    ));
 
-            return response.Hits.Select(s => s.Source).ToList();
+            //return response.Hits.Select(s => s.Source).ToList();
+
+            List<News>? newsPage = new();
+
+            try
+            {
+                string cacheKey = "newsKey";
+
+                byte[]? cachedData = await _cache.GetAsync(cacheKey);
+
+                if (cachedData != null)
+                {
+                    List<News>? newsList = new();
+
+                    // If the data is found in the cache, encode and deserialize cached data.
+                    var cachedDataString = Encoding.UTF8.GetString(cachedData);
+                    newsList = JsonSerializer.Deserialize<List<News>>(cachedDataString);
+
+                    for (int i = 0; i < page; i++)
+                    {
+                        if (newsList != null)
+                        {
+                            newsPage.Add(newsList[i]);
+                        }
+                    }
+                }
+            }catch(Exception e)
+            {
+                Console.WriteLine(e.Message);
+            }
+            
+            return newsPage;
         }
 
-        public List<News>? GetAllData()
+        public async Task<List<News>?> GetAllData()
         {
-            return NewsList;
+
+            List<News>? newsList = new();
+
+            string cacheKey = "newsKey";
+
+            byte[]? cachedData = await _cache.GetAsync(cacheKey);
+
+            if (cachedData != null)
+            {
+                // If the data is found in the cache, encode and deserialize cached data.
+                var cachedDataString = Encoding.UTF8.GetString(cachedData);
+                newsList = JsonSerializer.Deserialize<List<News>>(cachedDataString);
+            }
+            else
+            {
+                // If the data is not found in the cache, then fetch data from database
+                newsList = NewsList;
+
+                // Serializing the data
+                string cachedDataString = JsonSerializer.Serialize(newsList);
+                var dataToCache = Encoding.UTF8.GetBytes(cachedDataString);
+
+                // Setting up the cache options
+                // Sliding Expiration - A specific timespan within which the cache will expire if it is not used by anyone
+                // Absolute Expiration - It refers to the actual expiration of the cache entry without considering the sliding expiration
+
+                var options = new DistributedCacheEntryOptions()
+                .SetAbsoluteExpiration(DateTime.Now.AddMinutes(5))
+                .SetSlidingExpiration(TimeSpan.FromMinutes(3));
+
+                // Add the data into the cache
+                await _cache.SetAsync(cacheKey, dataToCache, options);
+            }
+
+            return newsList;
         }
 
         /// <summary>
@@ -121,7 +186,7 @@ namespace ExampleApi.Services
         /// <returns></returns>
         private async Task InsertDataRedis(News news)
         {
-            string cacheKey = Convert.ToString(news.Id);
+            string cacheKey = "newsKey";
 
             byte[]? cachedData = await _cache.GetAsync(cacheKey);
 

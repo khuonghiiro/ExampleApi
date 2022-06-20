@@ -16,7 +16,7 @@ namespace ExampleApi.Controllers
         }
 
         [HttpGet]
-        public List<News>? GetAll()
+        public Task<List<News>?> GetAll()
         {
             return _news.GetAllData();
         }

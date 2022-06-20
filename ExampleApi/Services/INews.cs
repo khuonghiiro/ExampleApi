@@ -4,7 +4,7 @@ namespace ExampleApi.Services
 {
     public interface INews
     {
-        public List<News>? GetAllData();
+        public Task<List<News>?> GetAllData();
 
         public Task<string> InsertSingleAsync(News news);
 

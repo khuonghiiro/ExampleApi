@@ -23,17 +23,22 @@ namespace ExampleApi.Services
             _elasticClient = elasticClient;
         }
 
+        /// <summary>
+        /// Insert single 1 news
+        /// </summary>
+        /// <param name="news"></param>
+        /// <returns></returns>
         public async Task<string> InsertSingleAsync(News news)
         {
             string cacheKey = Convert.ToString(news.Id);
-            
+
             // Insert data Redis
             await InsertDataRedis(news);
 
             // Insert data ElasticSearch
             await InsertDataES(news);
 
-            if(NewsList != null)
+            if (NewsList != null)
             {
                 // insert all data
                 foreach (var item in NewsList)
@@ -55,13 +60,18 @@ namespace ExampleApi.Services
                     await InsertDataES(item);
                 }
             }
-            
+
             return "Insert ElasticSearch and Redis success!";
         }
 
+        /// <summary>
+        /// Search with size page
+        /// </summary>
+        /// <param name="page"></param>
+        /// <returns></returns>
         public async Task<List<News>?> SearchNewByPage(int page)
         {
-            var response = await(_elasticClient.SearchAsync<News>(s => s
+            var response = await (_elasticClient.SearchAsync<News>(s => s
                                     .Index("news").Size(page)
                                 ));
 
@@ -73,16 +83,21 @@ namespace ExampleApi.Services
             return NewsList;
         }
 
+        /// <summary>
+        /// Search with title in data.json
+        /// </summary>
+        /// <param name="title"></param>
+        /// <returns></returns>
         public async Task<List<News>?> ElasticSearchTitle(string title)
         {
             var response = await (_elasticClient.SearchAsync<News>(s => s
                                     .Index("news")
                                     .Query(q => q
-                                        .Regexp(r => r
-                                            .Field(f => f.Title)
-                                            .Value(String.Format(".*{0}.*", title))
+                                        .MultiMatch(m => m.Query(title).
+                                        Fields(f => f.Field(v => v.Title)).
+                                        Fuzziness(Fuzziness.Auto)
                                         )
-                                    )
+                                    ).Size(3).From(0)
                                 ));
 
             return response.Hits.Select(s => s.Source).ToList();
@@ -121,5 +136,6 @@ namespace ExampleApi.Services
             // Insert data Redis
             await _cache.SetAsync(cacheKey, dataToCache, options);
         }
+
     }
 }

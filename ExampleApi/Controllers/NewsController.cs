@@ -1,8 +1,6 @@
-﻿using ExampleApi.Data;
-using ExampleApi.Model;
+﻿using ExampleApi.Model;
 using ExampleApi.Services;
 using Microsoft.AspNetCore.Mvc;
-using Newtonsoft.Json;
 
 namespace ExampleApi.Controllers
 {
@@ -32,14 +30,14 @@ namespace ExampleApi.Controllers
         [HttpPost]
         public Task<string> Post(News news)
         {
-            var dateTime = DateTime.Now;
+            //var dateTime = DateTime.Now;
 
-            var stringDate = dateTime.ToString("yyyy-MM-ddTHH\\:mm\\:ss");
+            //var stringDate = dateTime.ToString("yyyy-MM-ddTHH\\:mm\\:ss");
 
-            long unixTime = ((DateTimeOffset)dateTime).ToUnixTimeSeconds();
+            //long unixTime = ((DateTimeOffset)dateTime).ToUnixTimeSeconds();
 
-            news.Time = stringDate;
-            news.TimeUnix = unixTime*1000;
+            //news.Time = stringDate;
+            //news.TimeUnix = unixTime*1000;
 
             return _news.InsertSingleAsync(news);
         }

@@ -10,6 +10,8 @@
     <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="7.0.0-preview.5.22303.8" />
     <PackageReference Include="NEST" Version="7.17.2" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
+    <PackageReference Include="ServiceStack.Redis" Version="6.1.0" />
+    <PackageReference Include="StackExchange.Redis" Version="2.6.45" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.2.3" />
   </ItemGroup>
 

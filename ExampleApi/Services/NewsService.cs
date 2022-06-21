@@ -1,7 +1,7 @@
 ﻿using ExampleApi.Model;
 using Microsoft.Extensions.Caching.Distributed;
 using Nest;
-using System.Text;
+using StackExchange.Redis;
 using System.Text.Json;
 
 namespace ExampleApi.Services
@@ -11,16 +11,19 @@ namespace ExampleApi.Services
         private List<News>? NewsList { get; set; }
 
         private readonly IDistributedCache _cache;
-
+        private readonly IConnectionMultiplexer _redisCache;
+        private readonly IDatabaseAsync _redisDBAsync;
         private readonly IElasticClient _elasticClient;
 
-        private const string KEY_CACHE = "news";
+        private const string PREFIX = "news";
 
-        public NewsService(IDistributedCache cache, IElasticClient elasticClient)
+        public NewsService(IDistributedCache cache, IElasticClient elasticClient, IConnectionMultiplexer redisCache)
         {
             NewsList = Data.DataJson.LoadJson();
             _cache = cache;
             _elasticClient = elasticClient;
+            _redisCache = redisCache;
+            _redisDBAsync = _redisCache.GetDatabase();
         }
 
         /// <summary>
@@ -30,34 +33,43 @@ namespace ExampleApi.Services
         /// <returns></returns>
         public async Task<string> InsertSingleAsync(News news)
         {
-            string cacheKey = Convert.ToString(news.Id);
+            int number = Convert.ToInt32(NewsList?.Count) + 1;
+
+            string Key = PREFIX + number;
 
             // Insert data Redis
-            await InsertDataRedis(news);
+            await InsertDataRedis(Key, news);
 
             // Insert data ElasticSearch
             await InsertDataES(news);
 
             if (NewsList != null)
             {
+                int i = 0;
                 // insert all data
                 foreach (var item in NewsList)
                 {
-                    byte[]? cachedData = await _cache.GetAsync(Convert.ToString(item.Id));
+                    var keyRedis = new RedisKey();
+
+                    keyRedis = PREFIX + i;
+
+                    var isKeyRedis = await _redisDBAsync.KeyExistsAsync(keyRedis);
 
                     var response = await _elasticClient.GetAsync<News>(new DocumentPath<News>(
                         new Id(news.Id)), x => x.Index("news"));
 
-                    if (response.IsValid && cachedData != null)
+                    if (response.IsValid && isKeyRedis)
                     {
                         continue;
                     }
 
                     // Insert data Redis
-                    await InsertDataRedis(item);
+                    await InsertDataRedis(keyRedis.ToString(), item);
 
                     // Insert data ElasticSearch
                     await InsertDataES(item);
+
+                    i++;
                 }
             }
 
@@ -69,80 +81,72 @@ namespace ExampleApi.Services
         /// </summary>
         /// <param name="page"></param>
         /// <returns></returns>
-        public async Task<List<News>?> SearchNewByPage(int page)
+        public List<News>? SearchNewByPage(int page)
         {
-            //var response = await (_elasticClient.SearchAsync<News>(s => s
-            //                        .Index("news").Size(page)
-            //                    ));
-
-            //return response.Hits.Select(s => s.Source).ToList();
-
             List<News>? newsPage = new();
 
-            try
+            var keyList = new RedisKey[page];
+            //Generate keys array
+            for (int i = 0; i < page; i++)
             {
-                string cacheKey = "newsKey";
-
-                byte[]? cachedData = await _cache.GetAsync(cacheKey);
-
-                if (cachedData != null)
-                {
-                    List<News>? newsList = new();
-
-                    // If the data is found in the cache, encode and deserialize cached data.
-                    var cachedDataString = Encoding.UTF8.GetString(cachedData);
-                    newsList = JsonSerializer.Deserialize<List<News>>(cachedDataString);
-
-                    for (int i = 0; i < page; i++)
-                    {
-                        if (newsList != null)
-                        {
-                            newsPage.Add(newsList[i]);
-                        }
-                    }
-                }
-            }catch(Exception e)
-            {
-                Console.WriteLine(e.Message);
+                var key = new RedisKey();
+                key = PREFIX + i;
+                keyList.SetValue(key, i);
             }
-            
+
+            Task<RedisValue[]> values = _redisDBAsync.SetCombineAsync(SetOperation.Union, keyList);
+
+            foreach (var value in values.Result)
+            {
+                News? news = new();
+
+                news = Newtonsoft.Json.JsonConvert.DeserializeObject<News>(value.ToString());
+
+                if (news != null)
+                {
+                    newsPage.Add(news);
+                }
+            }
+
             return newsPage;
         }
 
         public async Task<List<News>?> GetAllData()
         {
-
             List<News>? newsList = new();
 
-            string cacheKey = "newsKey";
+            int number = Convert.ToInt32(NewsList?.Count);
 
-            byte[]? cachedData = await _cache.GetAsync(cacheKey);
-
-            if (cachedData != null)
+            for (int i = 0; i < NewsList?.Count; i++)
             {
-                // If the data is found in the cache, encode and deserialize cached data.
-                var cachedDataString = Encoding.UTF8.GetString(cachedData);
-                newsList = JsonSerializer.Deserialize<List<News>>(cachedDataString);
+                //RedisValue value = JsonSerializer.Serialize(NewsList[i]);
+                //await _redisDBAsync.SetAddAsync(PREFIX + i, value);
+                await InsertDataRedis(PREFIX + i, NewsList[i]);
             }
-            else
+
+            var keyList = new RedisKey[number];
+            //Generate keys array
+            for (int i = 0; i < number; i++)
             {
-                // If the data is not found in the cache, then fetch data from database
-                newsList = NewsList;
+                var key = new RedisKey();
+                key = PREFIX + i;
+                keyList.SetValue(key, i);
+            }
 
-                // Serializing the data
-                string cachedDataString = JsonSerializer.Serialize(newsList);
-                var dataToCache = Encoding.UTF8.GetBytes(cachedDataString);
+            Task<RedisValue[]> values = _redisDBAsync.SetCombineAsync(SetOperation.Union, keyList);
 
-                // Setting up the cache options
-                // Sliding Expiration - A specific timespan within which the cache will expire if it is not used by anyone
-                // Absolute Expiration - It refers to the actual expiration of the cache entry without considering the sliding expiration
+            for (int i = 0; i < number; i++)
+            {
+                News? news = new();
 
-                var options = new DistributedCacheEntryOptions()
-                .SetAbsoluteExpiration(DateTime.Now.AddMinutes(5))
-                .SetSlidingExpiration(TimeSpan.FromMinutes(3));
+                string? value = values.Result[i].ToString();
 
-                // Add the data into the cache
-                await _cache.SetAsync(cacheKey, dataToCache, options);
+                news = Newtonsoft.Json.JsonConvert.DeserializeObject<News>(value);
+
+                if (news != null)
+                {
+                    newsList.Add(news);
+                }
             }
 
             return newsList;
@@ -184,23 +188,11 @@ namespace ExampleApi.Services
         /// </summary>
         /// <param name="news">Object data model News</param>
         /// <returns></returns>
-        private async Task InsertDataRedis(News news)
+        private async Task InsertDataRedis(string key, News news)
         {
-            string cacheKey = "newsKey";
+            RedisValue value = JsonSerializer.Serialize(news);
 
-            byte[]? cachedData = await _cache.GetAsync(cacheKey);
-
-            string cachedDataString = JsonSerializer.Serialize(news);
-
-            var dataToCache = Encoding.UTF8.GetBytes(cachedDataString);
-
-            var options = new DistributedCacheEntryOptions()
-                .SetAbsoluteExpiration(DateTime.Now.AddMinutes(5))
-                .SetSlidingExpiration(TimeSpan.FromMinutes(3));
-
-            // Insert data Redis
-            await _cache.SetAsync(cacheKey, dataToCache, options);
+            await _redisDBAsync.SetAddAsync(key, value);
         }
-
     }
 }

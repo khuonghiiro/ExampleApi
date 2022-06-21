@@ -1,6 +1,5 @@
 ﻿using ExampleApi.Model;
 using Newtonsoft.Json;
-using System.IO;
 
 namespace ExampleApi.Data
 {

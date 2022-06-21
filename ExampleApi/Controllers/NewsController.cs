@@ -22,7 +22,7 @@ namespace ExampleApi.Controllers
         }
 
         [HttpGet("{page}")]
-        public Task<List<News>?> GetNewsByPage(int page)
+        public List<News>? GetNewsByPage(int page)
         {
             return _news.SearchNewByPage(page);
         }

@@ -1,5 +1,6 @@
 using ExampleApi.Services;
 using Nest;
+using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -11,6 +12,7 @@ builder.Services.AddSingleton<IElasticClient>(new ElasticClient(settings));
 
 //redis cache
 builder.Services.AddStackExchangeRedisCache(options => { options.Configuration = builder.Configuration["RedisCacheUrl"]; });
+builder.Services.AddSingleton<IConnectionMultiplexer>(sp => ConnectionMultiplexer.Connect(builder.Configuration["RedisCacheUrl"]));
 
 // Register the corresponding Interface service with the Class object 
 builder.Services.AddTransient<INews, NewsService>();

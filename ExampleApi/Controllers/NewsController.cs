@@ -24,7 +24,7 @@ namespace ExampleApi.Controllers
         [HttpGet("{page}")]
         public List<News>? GetNewsByPage(int page)
         {
-            return _news.SearchNewByPage(page);
+            return _news.SearchNewByPageAsync(page).Result;
         }
 
         [HttpPost]

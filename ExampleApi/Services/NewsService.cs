@@ -35,41 +35,30 @@ namespace ExampleApi.Services
         {
             int number = Convert.ToInt32(NewsList?.Count) + 1;
 
-            string Key = PREFIX + number;
-
             // Insert data Redis
-            await InsertDataRedis(Key, news);
+            await InsertSortedDataRedis(PREFIX, news, news.TimeUnix);
 
             // Insert data ElasticSearch
             await InsertDataES(news);
 
             if (NewsList != null)
             {
-                int i = 0;
                 // insert all data
                 foreach (var item in NewsList)
                 {
-                    var keyRedis = new RedisKey();
-
-                    keyRedis = PREFIX + i;
-
-                    var isKeyRedis = await _redisDBAsync.KeyExistsAsync(keyRedis);
+                    // Insert data Redis
+                    await InsertSortedDataRedis(PREFIX, item, item.TimeUnix);
 
                     var response = await _elasticClient.GetAsync<News>(new DocumentPath<News>(
                         new Id(news.Id)), x => x.Index("news"));
 
-                    if (response.IsValid && isKeyRedis)
+                    if (response.IsValid)
                     {
                         continue;
                     }
 
-                    // Insert data Redis
-                    await InsertDataRedis(keyRedis.ToString(), item);
-
                     // Insert data ElasticSearch
                     await InsertDataES(item);
-
-                    i++;
                 }
             }
 
@@ -81,31 +70,23 @@ namespace ExampleApi.Services
         /// </summary>
         /// <param name="page"></param>
         /// <returns></returns>
-        public List<News>? SearchNewByPage(int page)
+        public async Task<List<News>?> SearchNewByPageAsync(int page)
         {
             List<News>? newsPage = new();
 
-            var keyList = new RedisKey[page];
-            //Generate keys array
-            for (int i = 0; i < page; i++)
-            {
-                var key = new RedisKey();
-                key = PREFIX + i;
-                keyList.SetValue(key, i);
-            }
+            SortedSetEntry[] redisValueSorted = await _redisDBAsync.SortedSetRangeByRankWithScoresAsync(PREFIX, 0, page, Order.Ascending);
 
-            Task<RedisValue[]> values = _redisDBAsync.SetCombineAsync(SetOperation.Union, keyList);
-
-            foreach (var value in values.Result)
+            foreach (SortedSetEntry item in redisValueSorted)
             {
                 News? news = new();
 
-                news = Newtonsoft.Json.JsonConvert.DeserializeObject<News>(value.ToString());
+                news = Newtonsoft.Json.JsonConvert.DeserializeObject<News>(item.Element.ToString());
 
                 if (news != null)
                 {
                     newsPage.Add(news);
                 }
+
             }
 
             return newsPage;
@@ -119,34 +100,22 @@ namespace ExampleApi.Services
 
             for (int i = 0; i < NewsList?.Count; i++)
             {
-                //RedisValue value = JsonSerializer.Serialize(NewsList[i]);
-                //await _redisDBAsync.SetAddAsync(PREFIX + i, value);
-                await InsertDataRedis(PREFIX + i, NewsList[i]);
+                await InsertSortedDataRedis(PREFIX, NewsList[i], NewsList[i].TimeUnix);
             }
 
-            var keyList = new RedisKey[number];
-            //Generate keys array
-            for (int i = 0; i < number; i++)
-            {
-                var key = new RedisKey();
-                key = PREFIX + i;
-                keyList.SetValue(key, i);
-            }
+            SortedSetEntry[] redisValueSorted = await _redisDBAsync.SortedSetRangeByRankWithScoresAsync(PREFIX, 0, -1, Order.Ascending);
 
-            Task<RedisValue[]> values = _redisDBAsync.SetCombineAsync(SetOperation.Union, keyList);
-
-            for (int i = 0; i < number; i++)
+            foreach (var item in redisValueSorted)
             {
                 News? news = new();
 
-                string? value = values.Result[i].ToString();
-
-                news = Newtonsoft.Json.JsonConvert.DeserializeObject<News>(value);
+                news = Newtonsoft.Json.JsonConvert.DeserializeObject<News>(item.Element.ToString());
 
                 if (news != null)
                 {
                     newsList.Add(news);
                 }
+
             }
 
             return newsList;
@@ -188,11 +157,18 @@ namespace ExampleApi.Services
         /// </summary>
         /// <param name="news">Object data model News</param>
         /// <returns></returns>
-        private async Task InsertDataRedis(string key, News news)
+        private async Task InsertSetDataRedis(string key, News news)
         {
             RedisValue value = JsonSerializer.Serialize(news);
 
             await _redisDBAsync.SetAddAsync(key, value);
+        }
+
+        private async Task InsertSortedDataRedis(string key, News news, double score)
+        {
+            RedisValue value = JsonSerializer.Serialize(news);
+
+            await _redisDBAsync.SortedSetAddAsync(key, value, score);
         }
     }
 }

@@ -15,7 +15,8 @@ namespace ExampleApi.Services
         private readonly IDatabaseAsync _redisDBAsync;
         private readonly IElasticClient _elasticClient;
 
-        private const string PREFIX = "news";
+        private const string SORTED_KEY = "newsSorted";
+        private const string HASH_KEY = "newsHash";
 
         public NewsService(IDistributedCache cache, IElasticClient elasticClient, IConnectionMultiplexer redisCache)
         {
@@ -33,10 +34,15 @@ namespace ExampleApi.Services
         /// <returns></returns>
         public async Task<string> InsertSingleAsync(News news)
         {
-            int number = Convert.ToInt32(NewsList?.Count) + 1;
+            int number = Convert.ToInt32(NewsList?.Count);
+
+            string value = JsonSerializer.Serialize(news);
 
             // Insert data Redis
-            await InsertSortedDataRedis(PREFIX, news, news.TimeUnix);
+            await _redisDBAsync.SortedSetAddAsync(SORTED_KEY, news.Id.ToString(), news.TimeUnix);
+
+            //add data in datatype hash
+            await _redisDBAsync.HashSetAsync(HASH_KEY, new HashEntry[] { new HashEntry(news.Id.ToString(), value) });
 
             // Insert data ElasticSearch
             await InsertDataES(news);
@@ -46,16 +52,22 @@ namespace ExampleApi.Services
                 // insert all data
                 foreach (var item in NewsList)
                 {
-                    // Insert data Redis
-                    await InsertSortedDataRedis(PREFIX, item, item.TimeUnix);
+                    string valueItem = JsonSerializer.Serialize(item);
+
+                    // Insert data in datattype of Redis
+                    await _redisDBAsync.SortedSetAddAsync(SORTED_KEY, item.Id.ToString(), item.TimeUnix);
 
                     var response = await _elasticClient.GetAsync<News>(new DocumentPath<News>(
                         new Id(news.Id)), x => x.Index("news"));
 
-                    if (response.IsValid)
+                    if (response.IsValid &&
+                        (await _redisDBAsync.HashExistsAsync(HASH_KEY, item.Id.ToString())))
                     {
                         continue;
                     }
+
+                    // Insert data in datatype Hash of Redis
+                    await _redisDBAsync.HashSetAsync(HASH_KEY, new HashEntry[] { new HashEntry(item.Id.ToString(), valueItem) });
 
                     // Insert data ElasticSearch
                     await InsertDataES(item);
@@ -74,19 +86,27 @@ namespace ExampleApi.Services
         {
             List<News>? newsPage = new();
 
-            SortedSetEntry[] redisValueSorted = await _redisDBAsync.SortedSetRangeByRankWithScoresAsync(PREFIX, 0, page, Order.Ascending);
+            SortedSetEntry[] redisValueSorted = await _redisDBAsync.SortedSetRangeByRankWithScoresAsync(SORTED_KEY, 0, page-1, Order.Ascending);
 
             foreach (SortedSetEntry item in redisValueSorted)
             {
                 News? news = new();
 
-                news = Newtonsoft.Json.JsonConvert.DeserializeObject<News>(item.Element.ToString());
+                string keyNewsHash = item.Element.ToString();
+
+                if (!(await _redisDBAsync.HashExistsAsync(HASH_KEY, keyNewsHash)))
+                {
+                    continue;
+                }
+
+                var keyNewsValue = await _redisDBAsync.HashGetAsync(HASH_KEY, keyNewsHash);
+
+                news = Newtonsoft.Json.JsonConvert.DeserializeObject<News>(keyNewsValue.ToString());
 
                 if (news != null)
                 {
                     newsPage.Add(news);
                 }
-
             }
 
             return newsPage;
@@ -98,30 +118,49 @@ namespace ExampleApi.Services
 
             int number = Convert.ToInt32(NewsList?.Count);
 
+            HashEntry[] redisNewsHash = new HashEntry[number];
+
             for (int i = 0; i < NewsList?.Count; i++)
             {
-                await InsertSortedDataRedis(PREFIX, NewsList[i], NewsList[i].TimeUnix);
+                string id = NewsList[i].Id.ToString();
+                string value = JsonSerializer.Serialize(NewsList[i]);
+
+                // add data in datatype sortedset 
+                await _redisDBAsync.SortedSetAddAsync(SORTED_KEY, id, NewsList[i].TimeUnix);
+
+                redisNewsHash[i] = new HashEntry(id, value);
             }
 
-            SortedSetEntry[] redisValueSorted = await _redisDBAsync.SortedSetRangeByRankWithScoresAsync(PREFIX, 0, -1, Order.Ascending);
+            // add data in datatype hash 
+            await _redisDBAsync.HashSetAsync(HASH_KEY, redisNewsHash);
+
+            SortedSetEntry[] redisValueSorted = await _redisDBAsync.SortedSetRangeByRankWithScoresAsync(SORTED_KEY, 0, -1, Order.Ascending);
 
             foreach (var item in redisValueSorted)
             {
                 News? news = new();
 
-                news = Newtonsoft.Json.JsonConvert.DeserializeObject<News>(item.Element.ToString());
+                string keyNewsHash = item.Element.ToString();
+
+                if (!(await _redisDBAsync.HashExistsAsync(HASH_KEY, keyNewsHash)))
+                {
+                    continue;
+                }
+
+                var keyNewsValue = await _redisDBAsync.HashGetAsync(HASH_KEY, keyNewsHash);
+
+                news = Newtonsoft.Json.JsonConvert.DeserializeObject<News>(keyNewsValue.ToString());
 
                 if (news != null)
                 {
                     newsList.Add(news);
                 }
-
             }
 
             return newsList;
         }
 
-        /// <summary>
+        /// <summary> 
         /// Search with title in data.json
         /// </summary>
         /// <param name="title"></param>
@@ -164,11 +203,18 @@ namespace ExampleApi.Services
             await _redisDBAsync.SetAddAsync(key, value);
         }
 
-        private async Task InsertSortedDataRedis(string key, News news, double score)
+        public async Task<News?> GetElementById(string id)
         {
-            RedisValue value = JsonSerializer.Serialize(news);
+            News? news = new();
 
-            await _redisDBAsync.SortedSetAddAsync(key, value, score);
+            if (await _redisDBAsync.HashExistsAsync(HASH_KEY, id))
+            {
+                var keyNewsValue = await _redisDBAsync.HashGetAsync(HASH_KEY, id);
+
+                news = Newtonsoft.Json.JsonConvert.DeserializeObject<News>(keyNewsValue.ToString());
+            }
+
+            return news;
         }
     }
 }

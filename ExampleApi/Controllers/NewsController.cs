@@ -21,6 +21,12 @@ namespace ExampleApi.Controllers
             return _news.GetAllData();
         }
 
+        [HttpGet("GetAll/{id}")]
+        public News? GetNewsById(string id)
+        {
+            return _news.GetElementById(id).Result;
+        }
+
         [HttpGet("{page}")]
         public List<News>? GetNewsByPage(int page)
         {
@@ -30,18 +36,8 @@ namespace ExampleApi.Controllers
         [HttpPost]
         public Task<string> Post(News news)
         {
-            //var dateTime = DateTime.Now;
-
-            //var stringDate = dateTime.ToString("yyyy-MM-ddTHH\\:mm\\:ss");
-
-            //long unixTime = ((DateTimeOffset)dateTime).ToUnixTimeSeconds();
-
-            //news.Time = stringDate;
-            //news.TimeUnix = unixTime*1000;
-
             return _news.InsertSingleAsync(news);
         }
-
 
         [HttpGet("title")]
         public async Task<List<News>?> DoSearchAsync(string title = "")
